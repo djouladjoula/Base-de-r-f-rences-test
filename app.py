@@ -1,136 +1,155 @@
 import streamlit as st
 import pandas as pd
-from openpyxl import Workbook
-from io import BytesIO
 
-st.set_page_config(page_title="Cyber Requirement Tagging", layout="wide")
+st.set_page_config(page_title="Catégorisation Exigences Sécurité", layout="wide")
 
-st.title("🔐 Chatbot de catégorisation d’exigences de sécurité")
-st.markdown("Outil de test – Génération automatique du fichier **Base de références test**")
+st.title("🔐 Chatbot IA – Catégorisation des exigences de sécurité")
 
-# -----------------------------
-# Upload BASE DE TAG
-# -----------------------------
-st.header("1️⃣ Charger la base de tags")
-tags_file = st.file_uploader(
-    "Fichier Excel : Taxonomie_exigences_securite_ID_Arbo",
-    type=["xlsx"]
+# ==============================
+# 1. Chargement du fichier TAGS
+# ==============================
+
+TAGS_FILE = "Taxonomie_exigences_securite_ID_Arbo.xlsx"
+
+try:
+    tags_df = pd.read_excel(TAGS_FILE)
+except Exception as e:
+    st.error(f"Erreur lors du chargement du fichier de taxonomie : {e}")
+    st.stop()
+
+# ==============================
+# 2. Normalisation des colonnes
+# ==============================
+
+tags_df.columns = (
+    tags_df.columns
+    .astype(str)
+    .str.strip()
+    .str.upper()
+    .str.replace("\n", " ")
 )
 
-# -----------------------------
-# Exigence utilisateur
-# -----------------------------
-st.header("2️⃣ Saisir l’exigence de sécurité")
-exigence = st.text_area("Exigence", height=120)
+# ==============================
+# 3. Détection intelligente des colonnes
+# ==============================
 
-# -----------------------------
-# Placeholder analyse IA
-# -----------------------------
-def analyze_exigence_vs_tags(exigence_text, tags_df):
-    """
-    Fonction placeholder.
-    À remplacer par appel LLM / moteur IA.
-    Retour attendu :
-    dict { tag_id: (niveau, justification) }
-    """
+EXPECTED_COLUMNS = {
+    "CATEGORIE": ["CATEGORIE", "CATEGORY", "DOMAINE"],
+    "TAG": ["TAG", "LIBELLE", "INTITULE", "EXIGENCE"],
+    "DESCRIPTION": ["DESCRIPTION", "DESC", "DETAIL", "COMMENTAIRE"]
+}
 
-    results = {}
-    for _, row in tags_df.iterrows():
-        tag_id = row["ID"]
-        tag_name = row["TAG"]
+column_map = {}
 
-        # LOGIQUE TEMPORAIRE (à remplacer)
-        niveau = 0
-        justification = "Aucun lien identifié entre ce tag et l’exigence."
+for logical_col, aliases in EXPECTED_COLUMNS.items():
+    for col in tags_df.columns:
+        if col in aliases:
+            column_map[logical_col] = col
+            break
 
-        if tag_name.lower() in exigence_text.lower():
-            niveau = 4
-            justification = (
-                "Correspondance directe : l’exigence traite explicitement "
-                f"du thème couvert par le tag « {tag_name} »."
-            )
+missing_cols = set(EXPECTED_COLUMNS.keys()) - set(column_map.keys())
+if missing_cols:
+    st.error(
+        f"Colonnes obligatoires introuvables dans le fichier : {missing_cols}"
+    )
+    st.stop()
 
-        results[tag_id] = (niveau, justification)
+# Renommage standard
+tags_df = tags_df.rename(columns={
+    column_map["CATEGORIE"]: "CATEGORIE",
+    column_map["TAG"]: "TAG",
+    column_map["DESCRIPTION"]: "DESCRIPTION"
+})
 
-    return results
+# ==============================
+# 4. Nettoyage des lignes vides
+# ==============================
 
-# -----------------------------
-# Bouton lancement
-# -----------------------------
-st.header("3️⃣ Lancer la catégorisation")
+tags_df = tags_df.dropna(
+    subset=["CATEGORIE", "TAG", "DESCRIPTION"],
+    how="all"
+)
 
-if st.button("🚀 Générer le fichier Excel"):
+for col in ["CATEGORIE", "TAG", "DESCRIPTION"]:
+    tags_df[col] = tags_df[col].astype(str).str.strip()
 
-    if tags_file is None or not exigence.strip():
-        st.error("❌ Veuillez charger la base de tags et saisir une exigence.")
+# ==============================
+# 5. Vérification visuelle (debug)
+# ==============================
+
+with st.expander("🔍 Aperçu de la base de tags utilisée"):
+    st.dataframe(tags_df, use_container_width=True)
+
+st.success(f"✅ {len(tags_df)} tags de sécurité chargés et prêts à l’analyse")
+
+# ==============================
+# 6. Saisie de l'exigence
+# ==============================
+
+exigence = st.text_area(
+    "✍️ Saisissez l’exigence de sécurité à catégoriser",
+    height=150
+)
+
+# ==============================
+# 7. Analyse IA (MVP – règles simples)
+# ==============================
+
+def score_exigence(exigence, tag, description):
+    exigence = exigence.lower()
+    tag = tag.lower()
+    description = description.lower()
+
+    if tag in exigence:
+        return 4, "Correspondance directe : le tag est explicitement mentionné dans l’exigence."
+    if any(word in exigence for word in tag.split()):
+        return 3, "Correspondance forte : thématique du tag directement liée à l’exigence."
+    if any(word in exigence for word in description.split()):
+        return 2, "Lien indirect : le tag est pertinent dans le contexte général de l’exigence."
+    return 0, "Aucun lien direct ou indirect identifié avec l’exigence."
+
+# ==============================
+# 8. Lancement de l’analyse
+# ==============================
+
+if st.button("🚀 Lancer la catégorisation"):
+    if not exigence.strip():
+        st.warning("Merci de saisir une exigence de sécurité.")
+        st.stop()
+
+    results = []
+
+    for idx, row in tags_df.iterrows():
+        niveau, justification = score_exigence(
+            exigence,
+            row["TAG"],
+            row["DESCRIPTION"]
+        )
+
+        if niveau > 0:
+            results.append({
+                "ID Tag": idx + 1,
+                "Catégorie": row["CATEGORIE"],
+                "Tag": row["TAG"],
+                "Niveau de pertinence": niveau,
+                "Justification": justification
+            })
+
+    if not results:
+        st.info("Aucune correspondance pertinente trouvée.")
     else:
-        # Lecture base de tags
-        tags_df = pd.read_excel(tags_file)
-
-        # Filtrage lignes valides
-        tags_df = tags_df.dropna(
-            subset=["CATEGORIE", "TAG", "DESCRIPTION"],
-            how="all"
+        result_df = pd.DataFrame(results).sort_values(
+            by="Niveau de pertinence",
+            ascending=False
         )
 
-        # Analyse
-        analysis_results = analyze_exigence_vs_tags(exigence, tags_df)
+        st.subheader("📊 Résultats de la catégorisation")
+        st.dataframe(result_df, use_container_width=True)
 
-        # Création workbook
-        wb = Workbook()
+# ==============================
+# 9. Footer
+# ==============================
 
-        # -----------------------------
-        # ONGLET REFERENCES
-        # -----------------------------
-        ws_ref = wb.active
-        ws_ref.title = "REFERENCES"
+st.markdown("---")
+st.caption("Prototype IA – Analyse et catégorisation des exigences de sécurité")
 
-        headers = ["ID", "référentiel", "ID Exigence", "Exigence"]
-        for tag_id in tags_df["ID"]:
-            headers.append(f"Niveau Tag {tag_id}")
-            headers.append(f"Justification Tag {tag_id}")
-
-        ws_ref.append(headers)
-
-        row = [1, "N/A", "N/A", exigence]
-        for tag_id in tags_df["ID"]:
-            niveau, justification = analysis_results[tag_id]
-            row.extend([niveau, justification])
-
-        ws_ref.append(row)
-
-        # -----------------------------
-        # ONGLET CROISEMENT
-        # -----------------------------
-        ws_cross = wb.create_sheet(title="CROISEMENT")
-
-        ws_cross["A1"] = "Exigence"
-        ws_cross["B1"] = exigence
-
-        ws_cross.append([])
-        ws_cross.append([])
-        ws_cross.append(["ID", "Tag", "Niveau Tag", "Justification Tag"])
-
-        for _, row in tags_df.iterrows():
-            tag_id = row["ID"]
-            tag_name = row["TAG"]
-            niveau, justification = analysis_results[tag_id]
-
-            if niveau > 0:
-                ws_cross.append([tag_id, tag_name, niveau, justification])
-
-        # -----------------------------
-        # Export fichier
-        # -----------------------------
-        output = BytesIO()
-        wb.save(output)
-        output.seek(0)
-
-        st.success("✅ Fichier généré avec succès")
-
-        st.download_button(
-            label="📥 Télécharger le fichier Excel",
-            data=output,
-            file_name="Base de références test.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
