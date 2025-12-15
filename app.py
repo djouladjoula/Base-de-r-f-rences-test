@@ -13,7 +13,7 @@ st.markdown("Outil de test – Génération automatique du fichier **Base de ré
 # -----------------------------
 st.header("1️⃣ Charger la base de tags")
 tags_file = st.file_uploader(
-    "Fichier Excel : BASE DE TAG - CATEGORISATION EXIGENCE DE SECURITE",
+    "Fichier Excel : Taxonomie_exigences_securite_ID_Arbo",
     type=["xlsx"]
 )
 
